@@ -49,73 +49,49 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
     public static final int CAMERA_REQUEST = 4;
     private CameraBridgeViewBase mOpenCvCameraView;
     String pathToFile;
-    ImageView ImgPic,testView;
-    Bitmap testBitmap,img;
-    InputStream inputStream;
-    Button buttonProc, buttonGal,b1;
     TextToSpeech t1;
-    public Context mContext;
     JavaCameraView javaCameraView;
-    Scalar low,high;
-
-
+    Scalar low, high;
+    Mat input, output,proc,circles,lines;
+    boolean aligned = 0;
 
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        javaCameraView= (JavaCameraView) findViewById(R.id.cameraView);
+        javaCameraView = (JavaCameraView) findViewById(R.id.cameraView);
         javaCameraView.setCvCameraViewListener(this);
         javaCameraView.enableView();
-
-
-        t1 = new TextToSpeech(getApplicationContext(), new TextToSpeech.OnInitListener(){
-            @Override
-            public void onInit(int status){
-                if(status==TextToSpeech.SUCCESS){
-                    int result = t1.setLanguage(Locale.UK);
-                    if (result == TextToSpeech.LANG_MISSING_DATA
-                            || result== TextToSpeech.LANG_NOT_SUPPORTED){
-                        Log.e("TTS","Language not supported");
-                    }else {
-                        b1.setEnabled(true);
-                    }
-                }else{
-                    Log.e("TTS","Initialization failed");
-                }
-            }
-
-        });
-
-        b1.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                String toSpeak= "Text to speech is working";
-                Toast.makeText(getApplicationContext(),toSpeak,Toast.LENGTH_SHORT).show();
-                t1.speak(toSpeak,TextToSpeech.QUEUE_FLUSH,null);
-            }
-        });
-        if (OpenCVLoader.initDebug()){
-            Toast.makeText(getApplicationContext(),"OpenCV Loaded Successfully",Toast.LENGTH_SHORT).show();
+        if (OpenCVLoader.initDebug()) {
+            Toast.makeText(getApplicationContext(), "OpenCV Loaded Successfully", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(getApplicationContext(), "opencv load FAIL", Toast.LENGTH_LONG).show();
         }
-        else{
-            Toast.makeText(getApplicationContext(),"opencv load FAIL",Toast.LENGTH_LONG).show();
-        }
+    }
 
-//
+    @Override
+    protected void onPause() {
+        super.onPause();
+        javaCameraView.disableView();
+    }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        javaCameraView.enableView();
+    }
 
-        buttonProc.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                activate();
-            }
-        });
+    @Override
+    protected void onDestroy() {
+        javaCameraView.disableView();
+        super.onDestroy();
     }
 
     @Override
     public void onCameraViewStarted(int width, int height) {
-        Mat mat1= new Mat(width,height,CvType.CV_16UC4);
-        Mat mat1= new Mat(width,height,CvType.CV_16UC4);
+        input = new Mat(width, height, CvType.CV_16UC4);
+        output = new Mat(width, height, CvType.CV_16UC4);
+        proc = new Mat(width,height,CvType.CV_16UC4);
+        circles = new Mat(width,height,CvType.CV_16UC4);
     }
 
     @Override
@@ -125,123 +101,43 @@ public class MainActivity extends AppCompatActivity implements CameraBridgeViewB
 
     @Override
     public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame) {
-        return null;
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode,resultCode,data);
-        if (resultCode == RESULT_OK) {
-            if (requestCode == ImageGalleryReq) {
-                //Uri=address of image
-                //declare stream to read img data from sd
-                assert data != null;
-                Uri imageUri = data.getData();
-                //get input stream based on uri of img
-                try {
-                    assert imageUri != null;
-                    inputStream = getContentResolver().openInputStream(imageUri);
-                    //assume worked, get bitmap from stream
-                    img = BitmapFactory.decodeStream(inputStream);
-                    ImgPic.setImageBitmap(img);
-                    //ImgPic.setImageURI(imageUri);
-                } catch (FileNotFoundException e) {
-                    e.printStackTrace();
-                    Toast.makeText(getApplicationContext(), "Unable to open img", Toast.LENGTH_LONG).show();
-                }
+        Imgproc.cvtColor(inputFrame.rgba(), input, Imgproc.COLOR_BGR2HSV);
+        Core.inRange(input, low, high, output);
+        /* convert bitmap to mat */
+        Imgproc.cvtColor(input, proc, Imgproc.COLOR_BGR2GRAY);
+        Imgproc.GaussianBlur(proc, proc, new Size(9, 9), 0);
+        Imgproc.adaptiveThreshold(proc, proc, 255, Imgproc.ADAPTIVE_THRESH_MEAN_C, Imgproc.THRESH_BINARY_INV, 5, 4);
+        double dp = 1d;
+        double minDist = 500;
+        int minRadius = 100, maxRadius = 800;
+        double param1 = 70, param2 = 72;
+        Imgproc.HoughCircles(proc, circles,Imgproc.CV_HOUGH_GRADIENT, dp, minDist, param1,param2, minRadius, maxRadius);
+        Imgproc.HoughLines(proc, lines,param1,param1);
+                int numberOfCircles = (circles.rows() == 0) ? 0 : circles.cols();
+        for (int i = 0; i < numberOfCircles; i++) {
+            double[] circleCoordinates = circles.get(0, i);
+            double[] lineCoordinates = lines.get(0, i);
+            int x_circ = (int) circleCoordinates[0], y_circ = (int) circleCoordinates[1];
+            int x_lin = (int) lineCoordinates[0], y_lin = (int) lineCoordinates[1];
+            Point c_centre = new Point(x_circ, y_circ);
+            Point l_centre = new Point(x_lin, y_lin);
+            int radius = (int) circleCoordinates[2];
+            Imgproc.circle(circles, c_centre, radius, new Scalar(0,255, 0),10);
+            Imgproc.rectangle(lines, new Point(x_lin - 5, y_lin - 5),
+                    new Point(x_lin + 5, y_lin + 5),
+                    new Scalar(0, 128, 255), 5);
+            if (c_centre.x == l_centre.x && c_centre.y == l_centre.y){
+                String toSpeak = "Shot aimed";
+                t1.speak(toSpeak, TextToSpeech.QUEUE_FLUSH, null);
+                Toast.makeText(getApplicationContext(), toSpeak, Toast.LENGTH_SHORT).show();
             }
-            if (requestCode == 1) {
-                Bitmap bitmap1 = BitmapFactory.decodeFile(pathToFile);
-                ImgPic.setImageBitmap(bitmap1);
-
-            }
-        }else {
-            Toast.makeText(getApplicationContext(),"Error-result", Toast.LENGTH_LONG).show();
         }
-    }
-    public void activate() {
-        mOpenCvCameraView.enableView();
-
-            /* convert bitmap to mat */
-            Mat mat = new Mat(img.getWidth(), img.getHeight(),
-                    CvType.CV_8UC1);
-            Mat greyMat = new Mat(img.getWidth(), img.getHeight(),
-                    CvType.CV_8UC1);
-            Mat cannyMat = new Mat(img.getWidth(), img.getHeight(),
-                    CvType.CV_8UC1);
-            Bitmap testBitmap = img.copy(img.getConfig(),true);
-            Utils.bitmapToMat(img, mat);
-            /* convert to grayscale */
-            Imgproc.cvtColor(mat, greyMat, Imgproc.COLOR_BGR2GRAY);
-//            Imgproc.Canny(greyMat,cann);
-            Imgproc.GaussianBlur(greyMat, cannyMat, new Size(9, 9), 0);
-            Imgproc.adaptiveThreshold(cannyMat, cannyMat, 255, Imgproc.ADAPTIVE_THRESH_MEAN_C, Imgproc.THRESH_BINARY_INV, 5, 4);
-// accumulator value
-            double dp = 1d;
-// minimum distance between the center coordinates of detected circles in pixels
-            double minDist = 500;
-// min and max radii (set these values as you desire)
-            int minRadius = 100, maxRadius = 800;
-// param1 = gradient value used to handle edge detection
-// param2 = Accumulator threshold value for the
-// cv2.CV_HOUGH_GRADIENT method.
-// The smaller the threshold is, the more circles will be
-// detected (including false circles).
-// The larger the threshold is, the more circles will
-// potentially be returned.
-            double param1 = 70, param2 = 72;
-            /* create a Mat object to store the circles detected */
-            Mat circles = new Mat(img.getWidth(),
-                    img.getHeight(), CvType.CV_8UC1);
-            /* find the circle in the image */
-            Imgproc.HoughCircles(cannyMat, circles,
-                    Imgproc.CV_HOUGH_GRADIENT, dp, minDist, param1,
-                    param2, minRadius, maxRadius);
-            /* get the number of circles detected */
-            int numberOfCircles = (circles.rows() == 0) ? 0 : circles.cols();
-            /* draw the circles found on the image */
-            for (int i=0; i<numberOfCircles; i++) {
-                /* get the circle details, circleCoordinates[0, 1, 2] = (x,y,r)
-                 * (x,y) are the coordinates of the circle's center
-                 */
-                double[] circleCoordinates = circles.get(0, i);
-
-                int x = (int) circleCoordinates[0], y = (int) circleCoordinates[1];
-                Point centre = new Point(x, y);
-
-                int radius = (int) circleCoordinates[2];
-
-                /* circle's outline */
-                Imgproc.circle(mat, centre, radius, new Scalar(0,
-                        255, 0), 10);
-                /* circle's center outline */
-                Imgproc.rectangle(mat, new Point(x - 5, y - 5),
-                        new Point(x + 5, y + 5),
-                        new Scalar(0, 128, 255), 5);
-            }
-//            double array [] = new double[(int) (mat.total() * mat.channels())];
-            /* convert back to bitmap */
-//            int pixel = testBitmap.getPixel(array[0][0],array[0][1]);
-//            int r = Color.red(pixel);
-//            int b = Color.blue(pixel);
-//            int g = Color.green(pixel);
-
-             Utils.matToBitmap(mat,img);
-            Utils.matToBitmap(cannyMat,testBitmap);
-            ImgPic.setImageBitmap(img);
-            testView.setImageBitmap(testBitmap);
-
-            String toSpeak= "Image processing finished, there are"+numberOfCircles+"balls detected";
-            //find locations, take coordinates from centres compare to image dimensions
-            Color ballColour = new Color(img.get());
-
-
-            Toast.makeText(getApplicationContext(),toSpeak,Toast.LENGTH_SHORT).show();
-            t1.speak(toSpeak,TextToSpeech.QUEUE_FLUSH,null);
-
-        }
+        return output;
     }
 }
+
+
+
 
 
 
